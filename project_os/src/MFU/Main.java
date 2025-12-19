@@ -1,47 +1,26 @@
-package MFU;
-
 import java.util.*;
 
-public class Main {
+// 1. Logic Class: Handles the MFU Algorithm
+class MFUEngine {
+    private final int capacity;
+    private final List<Integer> frames;
+    private final Map<Integer, Integer> frequencyMap;
+    private final Map<Integer, Integer> arrivalTimeMap;
+    private int pageFaults;
+    private int timer;
 
-    public static void main(String[] args) {
-        Scanner scanner = new Scanner(System.in);
-        System.out.println("--- Virtual Memory MFU Simulator (Robust Version) ---");
-
-        // 1. Get Frame Count (Must be > 0)
-
-        int capacity = getValidPositiveInt(scanner, "Enter the number of frames: ");
-
-        // 2. Get Reference Count (Must be > 0)
-        int n = getValidPositiveInt(scanner, "Enter the number of page references: ");
-
-        // 3. Get Reference Sequence (Must be >= 0 and not text)
-        int[] referenceString = new int[n];
-        System.out.println("Enter page reference sequence:");
-        for (int i = 0; i < n; i++) {
-            referenceString[i] = getValidNonNegativeInt(scanner, "Page " + (i + 1) + ": ");
-        }
-
-        // 4. Run Simulation
-        try {
-            simulateMFU(referenceString, capacity);
-        } catch (Exception e) {
-            System.out.println("\n[Logic Error]: " + e.getMessage());
-        }
-
-        scanner.close();
+    public MFUEngine(int capacity) {
+        this.capacity = capacity;
+        this.frames = new ArrayList<>();
+        this.frequencyMap = new HashMap<>();
+        this.arrivalTimeMap = new HashMap<>();
+        this.pageFaults = 0;
+        this.timer = 0;
     }
 
-    public static void simulateMFU(int[] pages, int capacity) {
-        List<Integer> frames = new ArrayList<>();
-        Map<Integer, Integer> currentFrequency = new HashMap<>();
-        Map<Integer, Integer> arrivalTime = new HashMap<>();
-
-        int pageFaults = 0;
-        int timer = 0;
-
-        System.out.println("\nRef | Frames               | Status");
-        System.out.println("------------------------------------");
+    public void runSimulation(int[] pages) {
+        System.out.println("\nRef | Frames (In Memory)       | Status");
+        System.out.println("---------------------------------------");
 
         for (int page : pages) {
             timer++;
@@ -49,7 +28,7 @@ public class Main {
 
             if (frames.contains(page)) {
                 status = "Hit";
-                currentFrequency.put(page, currentFrequency.get(page) + 1);
+                frequencyMap.put(page, frequencyMap.get(page) + 1);
             } else {
                 status = "Fault";
                 pageFaults++;
@@ -57,42 +36,39 @@ public class Main {
                 if (frames.size() < capacity) {
                     frames.add(page);
                 } else {
-                    int victimIndex = findVictimIndex(frames, currentFrequency, arrivalTime);
+                    int victimIndex = findVictimIndex();
                     int removedPage = frames.get(victimIndex);
 
-                    // Reset stats for evicted page
-                    currentFrequency.remove(removedPage);
-                    arrivalTime.remove(removedPage);
+                    // Reset stats for the evicted page (Frequency resets on re-entry)
+                    frequencyMap.remove(removedPage);
+                    arrivalTimeMap.remove(removedPage);
 
-                    // Replace in the specific frame slot
+                    // Replace at the specific frame index
                     frames.set(victimIndex, page);
                 }
-                currentFrequency.put(page, 1);
-                arrivalTime.put(page, timer);
+                frequencyMap.put(page, 1);
+                arrivalTimeMap.put(page, timer);
             }
-            System.out.printf("%-3d | %-20s | %s\n", page, frames.toString(), status);
+            displayRow(page, status);
         }
-
-        System.out.println("------------------------------------");
-        System.out.println("Total Hits: " + (pages.length - pageFaults));
-        System.out.println("Total Page Faults: " + pageFaults);
-        System.out.printf("Fault Rate: %.2f%%\n", (double) pageFaults / pages.length * 100);
+        displaySummary(pages.length);
     }
 
-    private static int findVictimIndex(List<Integer> frames, Map<Integer, Integer> freqMap, Map<Integer, Integer> arrivalMap) {
+    private int findVictimIndex() {
         int victimIdx = 0;
         int maxFreq = -1;
 
         for (int i = 0; i < frames.size(); i++) {
             int currentPage = frames.get(i);
-            int currentFreq = freqMap.get(currentPage);
+            int currentFreq = frequencyMap.get(currentPage);
 
             if (currentFreq > maxFreq) {
                 maxFreq = currentFreq;
                 victimIdx = i;
-            } else if (currentFreq == maxFreq) {
-                // FIFO Tie-breaker
-                if (arrivalMap.get(currentPage) < arrivalMap.get(frames.get(victimIdx))) {
+            }
+            // FIFO Tie-breaker: If frequencies are tied, replace the oldest one
+            else if (currentFreq == maxFreq) {
+                if (arrivalTimeMap.get(currentPage) < arrivalTimeMap.get(frames.get(victimIdx))) {
                     victimIdx = i;
                 }
             }
@@ -100,27 +76,59 @@ public class Main {
         return victimIdx;
     }
 
-    // NEW HELPER: Ensures page numbers are 0 or higher and not text
-    private static int getValidNonNegativeInt(Scanner sc, String prompt) {
+    private void displayRow(int page, String status) {
+        System.out.printf("%-3d | %-24s | %s\n", page, frames.toString(), status);
+    }
+
+    private void displaySummary(int totalPages) {
+        double faultRate = (totalPages == 0) ? 0 : ((double) pageFaults / totalPages) * 100;
+        System.out.println("---------------------------------------");
+        System.out.println("Total Hits: " + (totalPages - pageFaults));
+        System.out.println("Total Page Faults: " + pageFaults);
+        System.out.printf("Fault Rate: %.2f%%\n", faultRate);
+    }
+}
+
+// 2. Utility Class: Handles Robust Input Validation
+class InputHandler {
+    private final Scanner scanner = new Scanner(System.in);
+
+    public int getValidInt(String prompt, boolean allowZero) {
         while (true) {
             System.out.print(prompt);
-            if (sc.hasNextInt()) {
-                int val = sc.nextInt();
-                if (val >= 0) return val;
-                System.out.println("Error: Page numbers cannot be negative.");
-            } else {
-                System.out.println("Error: Invalid input. Please enter a whole number.");
-                sc.next(); // Clear the invalid text
+            String input = scanner.next();
+            try {
+                int value = Integer.parseInt(input);
+                if (value < 0) {
+                    System.out.println("Error: Negative numbers are not allowed.");
+                } else if (!allowZero && value == 0) {
+                    System.out.println("Error: Value must be greater than 0.");
+                } else {
+                    return value;
+                }
+            } catch (NumberFormatException e) {
+                System.out.println("Error: '" + input + "' is not a valid number. Please enter a whole number.");
             }
         }
     }
+}
 
-    // HELPER: Ensures positive numbers for counts (frames/references)
-    private static int getValidPositiveInt(Scanner sc, String prompt) {
-        while (true) {
-            int val = getValidNonNegativeInt(sc, prompt);
-            if (val > 0) return val;
-            System.out.println("Error: This value must be greater than 0.");
+// 3. Main Class: Orchestrates the Program
+public class Main {
+    public static void main(String[] args) {
+        InputHandler input = new InputHandler();
+        System.out.println("--- Virtual Memory MFU Simulator (Class-Based) ---");
+
+        int capacity = input.getValidInt("Enter the number of frames: ", false);
+        int n = input.getValidInt("Enter the number of page references: ", false);
+
+        int[] referenceString = new int[n];
+        System.out.println("Enter page reference sequence:");
+        for (int i = 0; i < n; i++) {
+            referenceString[i] = input.getValidInt("Page " + (i + 1) + ": ", true);
         }
+
+        MFUEngine engine = new MFUEngine(capacity);
+        engine.runSimulation(referenceString);
     }
 }
